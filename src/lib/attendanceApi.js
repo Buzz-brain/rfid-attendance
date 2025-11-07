@@ -1,3 +1,9 @@
+export async function fetchAllAttendance(token) {
+  const res = await fetch(`${API_BASE}/attendance`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  return handleResponse(res);
+}
 // API utility for attendance endpoints
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 

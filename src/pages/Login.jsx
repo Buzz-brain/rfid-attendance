@@ -53,7 +53,7 @@ const Login = () => {
               <p className="text-sm text-muted-foreground">Management System</p>
             </div>
           </div>
-          
+
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="email">Email Address</Label>
@@ -70,7 +70,7 @@ const Login = () => {
                 />
               </div>
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
@@ -86,14 +86,14 @@ const Login = () => {
                 />
               </div>
             </div>
-            
-            <Button 
-              type="submit" 
+
+            <Button
+              type="submit"
               className="w-full gradient-primary"
               disabled={loading}
             >
               {loading ? (
-                'Logging in...'
+                "Logging in..."
               ) : (
                 <>
                   <LogIn className="w-4 h-4 mr-2" />
@@ -101,18 +101,20 @@ const Login = () => {
                 </>
               )}
             </Button>
+            {/* Register link */}
+            <p className="text-center text-sm text-black/70 mt-6">
+              Don't have an account?{" "}
+              <a
+                href="/register"
+                className="text-primary underline hover:text-primary/80"
+              >
+                Register
+              </a>
+            </p>
           </form>
-          
-          <div className="mt-6 p-4 bg-secondary/50 rounded-lg">
-            <p className="text-xs text-muted-foreground mb-2">Demo Credentials:</p>
-            <div className="space-y-1 text-xs">
-              <p><strong>Admin:</strong> admin@rfid.edu / admin123</p>
-              <p><strong>Lecturer:</strong> lecturer@rfid.edu / lecturer123</p>
-            </div>
-          </div>
         </div>
-        
-        <p className="text-center text-sm text-white/70 mt-6">
+
+        <p className="text-center text-sm text-white/70 mt-2">
           © 2024 RFID Attendance System. All rights reserved.
         </p>
       </motion.div>

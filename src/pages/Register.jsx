@@ -56,6 +56,11 @@ const Register = () => {
             {loading ? 'Registering...' : 'Register'}
           </Button>
         </form>
+        {/* Login link */}
+        <p className="text-center text-sm text-primary mt-6">
+          Already have an account?{' '}
+          <a href="/login" className="underline hover:text-primary/80">Login</a>
+        </p>
       </div>
     </div>
   );

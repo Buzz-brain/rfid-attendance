@@ -5,6 +5,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from '../components/ui/dialog';
 import useStore from '../store/useStore';
 import { toast } from 'sonner';
 import { saveAs } from 'file-saver';
@@ -12,7 +13,17 @@ import { saveAs } from 'file-saver';
 const Reports = () => {
   const attendance = useStore(state => state.attendance);
   const students = useStore(state => state.students);
-  const courses = useStore(state => state.courses);
+  let courses = useStore(state => state.courses);
+  // If courses array is empty, extract unique courses from attendance records
+  if (!courses || courses.length === 0) {
+    const courseMap = {};
+    attendance.forEach(rec => {
+      if (rec.course && rec.course._id) {
+        courseMap[rec.course._id] = rec.course;
+      }
+    });
+    courses = Object.values(courseMap);
+  }
   const fetchAttendanceByCourse = useStore(state => state.fetchAttendanceByCourse);
   const fetchAttendanceByDate = useStore(state => state.fetchAttendanceByDate);
   const [loading, setLoading] = useState(false);
@@ -24,25 +35,54 @@ const Reports = () => {
     timestamp: '',
     status: 'present'
   });
+  const [editOriginalRecord, setEditOriginalRecord] = useState(null);
   const openEditModal = (session) => {
-    setEditAttendanceId(session.id);
+    setEditAttendanceId(session._id || session.id);
+    setEditOriginalRecord(session); // keep full original record
+    // Use a valid date field for editing
+    let dateValue = session.startTime || session.date || session.createdAt;
+    let timestamp = '';
+    if (dateValue) {
+      const d = new Date(dateValue);
+      if (!isNaN(d.getTime())) {
+        timestamp = d.toISOString().slice(0, 16);
+      }
+    }
     setEditFormData({
-      timestamp: new Date(session.startTime).toISOString().slice(0, 16),
+      timestamp,
       status: session.status || 'present'
     });
     setIsEditModalOpen(true);
   };
 
+  // Attendance details modal
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [selectedAttendance, setSelectedAttendance] = useState(null);
+  const openDetailsModal = (attendance) => {
+    setSelectedAttendance(attendance);
+    setDetailsModalOpen(true);
+  };
+
   const handleEditSubmit = async (e) => {
     e.preventDefault();
-    await updateAttendance(editAttendanceId, editFormData);
+    // Merge edited fields with original record, preserving all other fields
+    const merged = {
+      ...editOriginalRecord,
+      status: editFormData.status,
+      // Convert timestamp back to date/time fields
+      date: editFormData.timestamp ? new Date(editFormData.timestamp) : editOriginalRecord.date,
+      timeIn: editFormData.timestamp ? editFormData.timestamp.split('T')[1] || editOriginalRecord.timeIn : editOriginalRecord.timeIn,
+    };
+    await updateAttendance(editAttendanceId, merged);
     toast.success('Attendance session updated!');
     setIsEditModalOpen(false);
   };
 
   const handleDelete = async (id, courseId = null) => {
     if (window.confirm('Delete this attendance session?')) {
-      await deleteAttendance(id);
+      // Defensive: use _id if present
+      const attendanceId = id?._id || id;
+      await deleteAttendance(attendanceId);
       toast.success('Attendance session deleted');
       // Immediately refetch attendance according to active filters or course context
       try {
@@ -69,6 +109,8 @@ const Reports = () => {
         await fetchAttendanceByCourse(filterCourse);
       } else if (filterDate) {
         await fetchAttendanceByDate(filterDate);
+      } else {
+        await useStore.getState().fetchAllAttendance();
       }
       setLoading(false);
     };
@@ -86,7 +128,12 @@ const Reports = () => {
   const handleExportCSV = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/admin/reports/export`, {
+      // Build query params for filters
+      const params = new URLSearchParams();
+      if (filterCourse && filterCourse !== 'all') params.append('courseId', filterCourse);
+      if (filterDate) params.append('date', filterDate);
+      const url = `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/admin/reports/export?${params.toString()}`;
+      const res = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!res.ok) throw new Error('Failed to export CSV');
@@ -101,7 +148,12 @@ const Reports = () => {
   const handleExportPDF = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/admin/reports/export-pdf`, {
+      // Build query params for filters
+      const params = new URLSearchParams();
+      if (filterCourse && filterCourse !== 'all') params.append('courseId', filterCourse);
+      if (filterDate) params.append('date', filterDate);
+      const url = `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/admin/reports/export-pdf?${params.toString()}`;
+      const res = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!res.ok) throw new Error('Failed to export PDF');
@@ -149,11 +201,17 @@ const Reports = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Courses</SelectItem>
-                {courses.map(course => (
-                  <SelectItem key={course._id || course.id} value={(course._id || course.id || '').toString()}>
-                    {course.code} - {course.title}
-                  </SelectItem>
-                ))}
+                {[...courses]
+                  .sort((a, b) => {
+                    const codeA = a.code || a.courseCode || '';
+                    const codeB = b.code || b.courseCode || '';
+                    return codeA.localeCompare(codeB);
+                  })
+                  .map(course => (
+                    <SelectItem key={course._id || course.id} value={(course._id || course.id || '').toString()}>
+                      {(course.code || course.courseCode || '') + ' - ' + (course.title || course.courseTitle || '')}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>
@@ -236,7 +294,7 @@ const Reports = () => {
         ) : (
           <div className="space-y-3">
             {filteredAttendance.map((session, index) => {
-              // defensive handling: session may be a single attendance doc or a session object
+              // Defensive handling and UI/UX redesign for attendance card
               const attendeesCount = Array.isArray(session.attendees)
                 ? session.attendees.length
                 : (typeof session.attendees === 'number' ? session.attendees : (session.student ? 1 : 0));
@@ -244,12 +302,22 @@ const Reports = () => {
                 ? Math.round((attendeesCount / students.length) * 100)
                 : 0;
               const key = session._id || session.id || `session-${index}`;
-              const courseCode = session.course?.code || session.courseCode || session.courseTitle || '—';
-              const courseTitle = session.course?.title || session.courseTitle || '';
+              const courseCode =
+                session.course?.courseCode ||
+                session.courseCode ||
+                session.courseTitle ||
+                "—";
+              const courseTitle =
+                session.course?.courseTitle || session.courseTitle || "";
               const start = session.startTime || session.date || session.createdAt;
               const startDisplay = start ? new Date(start).toLocaleDateString('en-US', {
                 weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
               }) : '—';
+              // Avatar logic
+              const avatarUrl = session.student?.photo || null;
+              // Status badge color
+              const status = session.status || (percentage >= 75 ? 'Present' : percentage >= 50 ? 'Partial' : 'Absent');
+              const statusColor = status === 'Present' ? 'bg-success/80 text-white' : status === 'Partial' ? 'bg-warning/80 text-white' : 'bg-destructive/80 text-white';
 
               return (
                 <motion.div
@@ -257,31 +325,57 @@ const Reports = () => {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.05 }}
-                  className="p-4 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors"
+                  className="relative p-4 rounded-xl shadow-md bg-white/80 dark:bg-secondary/70 hover:shadow-lg transition-all cursor-pointer group"
+                  onClick={() => openDetailsModal(session)}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h4 className="font-bold">{courseCode}</h4>
-                        <span className="text-sm text-muted-foreground">{courseTitle}</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground">{startDisplay}</p>
+                  <div className="flex items-center gap-4">
+                    {/* Avatar */}
+                    <div className="flex-shrink-0">
+                      {avatarUrl ? (
+                        <img src={avatarUrl} alt="Student" className="w-12 h-12 rounded-full object-cover border-2 border-primary" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center border-2 border-muted-foreground">
+                          <Users className="w-6 h-6 text-muted-foreground" />
+                        </div>
+                      )}
                     </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold">{attendeesCount}</p>
-                      <p className="text-xs text-muted-foreground">students</p>
-                      <p className={`text-sm font-medium mt-1 ${
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-bold text-lg truncate">{courseCode}</span>
+                        <span className="text-xs text-muted-foreground truncate">{courseTitle}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+                        <Calendar className="w-4 h-4 mr-1" />
+                        <span>{startDisplay}</span>
+                      </div>
+                      {session.student && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="font-semibold">{session.student.name}</span>
+                          <span className="text-xs text-muted-foreground">({session.student.regNo})</span>
+                        </div>
+                      )}
+                      {session.rfidTag && (
+                        <div className="text-xs text-muted-foreground">RFID: {session.rfidTag}</div>
+                      )}
+                    </div>
+                    {/* Status & Actions */}
+                    <div className="flex flex-col items-end gap-2">
+                      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${statusColor}`}>{status}</span>
+                      <span className="text-xl font-bold text-primary">{attendeesCount}</span>
+                      <span className="text-xs text-muted-foreground">students</span>
+                      <span className={`text-xs font-medium mt-1 ${
                         percentage >= 75 ? 'text-success' : 
                         percentage >= 50 ? 'text-warning' : 
                         'text-destructive'
                       }`}>
                         {percentage}%
-                      </p>
+                      </span>
                       <div className="flex gap-2 mt-2">
-                        <Button variant="ghost" size="icon" onClick={() => openEditModal(session)}>
+                        <Button variant="ghost" size="icon" onClick={e => { e.stopPropagation(); openEditModal(session); }} title="Edit Attendance" className="opacity-70 group-hover:opacity-100">
                           <Edit className="w-4 h-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(session.id, session.course?._id)}>
+                        <Button variant="ghost" size="icon" onClick={e => { e.stopPropagation(); handleDelete(session._id || session.id, session.course?._id); }} title="Delete Attendance" className="opacity-70 group-hover:opacity-100">
                           <Trash2 className="w-4 h-4 text-destructive" />
                         </Button>
                       </div>
@@ -293,11 +387,44 @@ const Reports = () => {
           </div>
         )}
       </div>
+      {/* Attendance Details Modal */}
+      <Dialog open={detailsModalOpen} onOpenChange={setDetailsModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Attendance Details</DialogTitle>
+            <DialogDescription>Full details for this attendance record</DialogDescription>
+          </DialogHeader>
+          {selectedAttendance && (
+            <div className="space-y-2">
+              <div><strong>Date:</strong> {selectedAttendance.date ? new Date(selectedAttendance.date).toLocaleString() : '—'}</div>
+              <div><strong>Time In:</strong> {selectedAttendance.timeIn || '—'}</div>
+              <div><strong>Status:</strong> {selectedAttendance.status || '—'}</div>
+              <div><strong>RFID Tag:</strong> {selectedAttendance.rfidTag || '—'}</div>
+              <div><strong>Course:</strong> {selectedAttendance.course ? `${selectedAttendance.course.courseCode || ''} - ${selectedAttendance.course.courseTitle || ''}` : '—'}</div>
+              <div><strong>Student:</strong> {selectedAttendance.student ? `${selectedAttendance.student.name} (${selectedAttendance.student.regNo})` : '—'}</div>
+              {selectedAttendance.student && selectedAttendance.student.photo && (
+                <div>
+                  <img src={selectedAttendance.student.photo} alt="Student" className="w-24 h-24 rounded-full object-cover" />
+                </div>
+              )}
+              <div><strong>Created At:</strong> {selectedAttendance.createdAt ? new Date(selectedAttendance.createdAt).toLocaleString() : '—'}</div>
+              <div><strong>Updated At:</strong> {selectedAttendance.updatedAt ? new Date(selectedAttendance.updatedAt).toLocaleString() : '—'}</div>
+              <div><strong>ID:</strong> {selectedAttendance._id || selectedAttendance.id || '—'}</div>
+            </div>
+          )}
+          <DialogClose asChild>
+            <Button variant="outline">Close</Button>
+          </DialogClose>
+        </DialogContent>
+      </Dialog>
+
       {/* Edit Attendance Session Modal */}
-      <div>
-        <dialog open={isEditModalOpen} className="max-w-md rounded-xl shadow-xl p-8 bg-background">
+      <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Attendance Session</DialogTitle>
+          </DialogHeader>
           <form onSubmit={handleEditSubmit} className="space-y-4">
-            <h2 className="text-xl font-bold mb-4">Edit Attendance Session</h2>
             <div className="space-y-2">
               <label htmlFor="edit-timestamp">Timestamp</label>
               <input
@@ -322,16 +449,18 @@ const Reports = () => {
               </select>
             </div>
             <div className="flex gap-3 justify-end mt-4">
-              <Button type="button" variant="outline" onClick={() => setIsEditModalOpen(false)}>
-                Cancel
-              </Button>
+              <DialogClose asChild>
+                <Button type="button" variant="outline" onClick={() => setIsEditModalOpen(false)}>
+                  Cancel
+                </Button>
+              </DialogClose>
               <Button type="submit" className="gradient-primary">
                 Save Changes
               </Button>
             </div>
           </form>
-        </dialog>
-      </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

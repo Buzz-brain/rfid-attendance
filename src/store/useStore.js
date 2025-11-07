@@ -9,6 +9,14 @@ import * as attendanceApi from '../lib/attendanceApi';
 // TODO: Replace with real API calls and backend integration
 
 const useStore = create((set, get) => ({
+  fetchAllAttendance: async () => {
+    const token = get().token || localStorage.getItem('token');
+    if (!token) return;
+    const result = await attendanceApi.fetchAllAttendance(token);
+    if (result.success && Array.isArray(result.data)) {
+      set({ attendance: result.data });
+    }
+  },
       // Auth state
       user: null,
       token: null,
